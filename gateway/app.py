@@ -75,10 +75,10 @@ except ImportError:
 
 
 try:
-    from .auth import verify_token
+    from .auth import login, verify_token
 except ImportError:
     try:
-        from auth import verify_token  # type: ignore
+        from auth import login, verify_token  # type: ignore
     except ImportError:
 
         def verify_token(token: str) -> dict | None:
@@ -91,6 +91,10 @@ except ImportError:
                 "org": "demo",
                 "irb_approved": True,
             }
+
+        def login(username: str) -> dict:
+            """Stub — mirrors auth.login()'s {"token": ...} response shape."""
+            return {"token": f"stub-token-for-{username}"}
 
 
 # ---------------------------------------------------------------------------
@@ -125,6 +129,10 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 # Request models
 # ---------------------------------------------------------------------------
+
+
+class LoginRequest(BaseModel):
+    username: str = Field(..., examples=["jorgenson"])
 
 
 class SearchRequest(BaseModel):
@@ -168,17 +176,20 @@ async def _fanout_search(
     base_url: str,
     payload: dict[str, Any],
 ) -> dict[str, Any]:
+    # NOTE: hospital node /api/search responds with {"node": ..., "count": ...},
+    # but the privacy.apply_suppression() contract (section 7) expects each row
+    # keyed as {"hospital": ..., "count": ...}. Normalize here.
     try:
         resp = await client.post(f"{base_url}/api/search", json=payload)
         if resp.status_code != 200:
-            return {"node": name, "count": 0}
+            return {"hospital": name, "count": 0}
         data = resp.json()
         return {
-            "node": data.get("node", name),
+            "hospital": data.get("node", name),
             "count": int(data.get("count", 0)),
         }
     except (httpx.HTTPError, ValueError, TypeError):
-        return {"node": name, "count": 0}
+        return {"hospital": name, "count": 0}
 
 
 def _network_total(raw_counts: list[dict], k: int = 5) -> str:
@@ -219,6 +230,13 @@ def _strip_pii(obj: Any) -> Any:
 @app.get("/health")
 def health():
     return {"status": "healthy", "service": "gateway"}
+
+
+@app.post("/login")
+def login_route(body: LoginRequest):
+    """Issue a signed token carrying {role, org, irb_approved} for `username`.
+    Unknown usernames resolve to the anonymous role (see auth.USERS)."""
+    return login(body.username)
 
 
 @app.post("/search")
