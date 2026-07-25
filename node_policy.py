@@ -2,28 +2,32 @@
 Per-hospital retrieval policy (MedFind PRD section 7 / section 4).
 
 Each node owns and evaluates its OWN policy — the hospital decides, not the
-gateway. Policies deliberately differ across hospitals so a researcher (e.g.
-Dr. Jorgenson, role="irb_approved") can be permitted at one site and denied
-at another. The gateway never sees or influences this table; it only forwards
-the caller's token.
+gateway. Policies deliberately differ across hospitals so a researcher can be
+permitted at one site and denied at another even with a grant. The gateway
+also enforces the user's hospital allowlist before forwarding retrieve calls.
+
+network_admin is allowed at every site (network master).
 """
 
-Role = str  # "anonymous" | "affiliated" | "irb_approved"
+Role = str  # "anonymous" | "affiliated" | "irb_approved" | "network_admin"
 Decision = str  # "allow" | "deny"
 
 # NODE_POLICIES[node_name][role] -> "allow" | "deny"
 NODE_POLICIES: dict[str, dict[Role, Decision]] = {
     "BCH": {
+        "network_admin": "allow",
+        "irb_approved": "allow",
+        "affiliated": "allow",
+        "anonymous": "deny",
+    },
+    "MGH": {
+        "network_admin": "allow",
         "irb_approved": "allow",
         "affiliated": "deny",
         "anonymous": "deny",
     },
-    "MGH": {
-        "irb_approved": "deny",
-        "affiliated": "deny",
-        "anonymous": "deny",
-    },
     "BWH": {
+        "network_admin": "allow",
         "irb_approved": "allow",
         "affiliated": "allow",
         "anonymous": "deny",
@@ -32,6 +36,7 @@ NODE_POLICIES: dict[str, dict[Role, Decision]] = {
 
 # Fail closed: any node/role combination not explicitly listed above is denied.
 DEFAULT_POLICY: dict[Role, Decision] = {
+    "network_admin": "deny",
     "irb_approved": "deny",
     "affiliated": "deny",
     "anonymous": "deny",

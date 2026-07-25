@@ -1,0 +1,33 @@
+{
+  "admin": {
+    "password": "admin",
+    "role": "network_admin",
+    "org": "MedFind Network",
+    "irb_approved": true,
+    "hospitals": [
+      "BCH",
+      "MGH",
+      "BWH"
+    ]
+  },
+  "alice": {
+    "password": "alice123",
+    "role": "irb_approved",
+    "org": "MIT",
+    "irb_approved": true,
+    "hospitals": [
+      "BCH",
+      "MGH"
+    ]
+  },
+  "arisu": {
+    "password": "arisu123",
+    "role": "irb_approved",
+    "org": "Independent",
+    "irb_approved": true,
+    "hospitals": [
+      "BCH",
+      "BWH"
+    ]
+  }
+}

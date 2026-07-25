@@ -96,8 +96,14 @@ def get_study(study_id: str):
 JWT_SECRET = os.environ.get(
     "MEDFIND_JWT_SECRET", "medfind-hackathon-demo-secret-do-not-use-in-prod"
 ).encode()
-VALID_ROLES = {"anonymous", "affiliated", "irb_approved"}
-ANONYMOUS_CLAIMS = {"role": "anonymous", "org": None, "irb_approved": False, "sub": None}
+VALID_ROLES = {"anonymous", "affiliated", "irb_approved", "network_admin"}
+ANONYMOUS_CLAIMS = {
+    "role": "anonymous",
+    "org": None,
+    "irb_approved": False,
+    "sub": None,
+    "hospitals": [],
+}
 
 
 def _b64url_decode(segment: str) -> bytes:
@@ -106,7 +112,7 @@ def _b64url_decode(segment: str) -> bytes:
 
 
 def verify_token(token: str | None) -> dict:
-    """Verify a signed MedFind auth token -> {role, org, irb_approved, sub}.
+    """Verify a signed MedFind auth token -> {role, org, irb_approved, sub, hospitals}.
 
     Missing, malformed, unsigned, or expired tokens all resolve to the
     anonymous role rather than raising, so callers can always trust the
@@ -133,11 +139,16 @@ def verify_token(token: str | None) -> dict:
     if role not in VALID_ROLES:
         role = "anonymous"
 
+    hospitals = payload.get("hospitals") or []
+    if not isinstance(hospitals, list):
+        hospitals = []
+
     return {
         "role": role,
         "org": payload.get("org"),
         "irb_approved": payload.get("irb_approved", role == "irb_approved"),
         "sub": payload.get("sub"),
+        "hospitals": [str(h).upper() for h in hospitals],
     }
 
 
@@ -206,6 +217,19 @@ def retrieve(req: RetrieveRequest, authorization: str | None = Header(default=No
     token = _bearer_token(authorization)
     claims = verify_token(token)
     role = claims["role"]
+    granted = claims.get("hospitals") or []
+
+    # Defense in depth: hospital grant list must include this node.
+    if HOSPITAL_NODE not in granted:
+        return JSONResponse(
+            status_code=403,
+            content={
+                "error": (
+                    f"User not granted access to {HOSPITAL_NODE}. "
+                    f"Granted hospitals: {', '.join(granted) or '(none)'}."
+                )
+            },
+        )
 
     if not is_allowed(HOSPITAL_NODE, role):
         return JSONResponse(
