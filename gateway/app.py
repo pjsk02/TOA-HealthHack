@@ -44,21 +44,23 @@ except ImportError:
 
 
 try:
-    from .privacy import apply_suppression
+    from .privacy import apply_suppression, privatize_count
 except ImportError:
     try:
-        from privacy import apply_suppression  # type: ignore
+        from privacy import apply_suppression, privatize_count  # type: ignore
     except ImportError:
 
         def apply_suppression(
             hospital_counts: list[dict],
             k: int = 5,
             role: str = "anonymous",
+            epsilon: float | None = None,
         ) -> list[dict]:
             """Stub — replace any count < k with the safe message;
             anonymous sees network-total only (empty per-hospital list)."""
             SAFE = (
-                "Cohort too small to display safely (fewer than 5 records)."
+                "Result suppressed to protect patient privacy. "
+                "Cohort too small to release a count."
             )
             if role == "anonymous":
                 return []
@@ -73,28 +75,82 @@ except ImportError:
                     results.append({"hospital": hospital, "count": count})
             return results
 
+        def privatize_count(
+            count: int, k: int = 5, epsilon: float | None = None
+        ) -> int:
+            return int(count)
+
 
 try:
-    from .auth import login, verify_token
+    from .hierarchy import next_coarser_from_expanded
 except ImportError:
     try:
-        from auth import login, verify_token  # type: ignore
+        from hierarchy import next_coarser_from_expanded  # type: ignore
+    except ImportError:
+
+        def next_coarser_from_expanded(expanded: dict) -> dict | None:
+            return None
+
+
+try:
+    from .auth import (
+        login,
+        list_users,
+        require_network_admin,
+        signup,
+        update_user,
+        verify_token,
+    )
+except ImportError:
+    try:
+        from auth import (  # type: ignore
+            login,
+            list_users,
+            require_network_admin,
+            signup,
+            update_user,
+            verify_token,
+        )
     except ImportError:
 
         def verify_token(token: str) -> dict | None:
-            """Stub — returns role claims or None if invalid."""
             if not token:
                 return None
-            # Accept any non-empty token as IRB-approved for local wiring.
             return {
-                "role": "irb_approved",
+                "role": "network_admin",
                 "org": "demo",
                 "irb_approved": True,
+                "hospitals": ["BCH", "MGH", "BWH"],
+                "username": "admin",
             }
 
-        def login(username: str) -> dict:
-            """Stub — mirrors auth.login()'s {"token": ...} response shape."""
-            return {"token": f"stub-token-for-{username}"}
+        def login(username: str, password: str) -> dict:
+            return {
+                "token": f"stub-token-for-{username}",
+                "username": username,
+                "role": "network_admin",
+                "org": "demo",
+                "hospitals": ["BCH", "MGH", "BWH"],
+            }
+
+        def signup(username: str, password: str, org: str | None = None) -> dict:
+            return {
+                "username": username,
+                "role": "affiliated",
+                "org": org or "Independent",
+                "irb_approved": False,
+                "hospitals": [],
+            }
+
+        def list_users() -> list:
+            return []
+
+        def update_user(username: str, **kwargs) -> dict:
+            return {"username": username, **kwargs}
+
+        def require_network_admin(claims: dict | None) -> None:
+            if not claims or claims.get("role") != "network_admin":
+                raise PermissionError("admin_required")
 
 
 # ---------------------------------------------------------------------------
@@ -132,12 +188,33 @@ app.add_middleware(
 
 
 class LoginRequest(BaseModel):
-    username: str = Field(..., examples=["jorgenson"])
+    username: str = Field(..., examples=["admin"])
+    password: str = Field(..., examples=["admin"])
+
+
+class SignupRequest(BaseModel):
+    username: str = Field(..., examples=["alice"])
+    password: str = Field(..., examples=["alice123"])
+    org: Optional[str] = Field(default=None, examples=["MIT"])
+
+
+class AdminUserUpdate(BaseModel):
+    role: Optional[str] = Field(default=None, examples=["irb_approved"])
+    hospitals: Optional[list[str]] = Field(
+        default=None, examples=[["BCH", "MGH"]]
+    )
+    org: Optional[str] = None
+    irb_approved: Optional[bool] = None
 
 
 class SearchRequest(BaseModel):
     query: str = Field(..., examples=["pediatric brain tumor MRI"])
     max_age_years: Optional[int] = Field(default=None, examples=[3])
+    epsilon: Optional[float] = Field(
+        default=None,
+        examples=[0.5],
+        description="Optional ε for Laplace DP noise on surviving counts.",
+    )
 
 
 class RetrieveRequest(BaseModel):
@@ -150,11 +227,15 @@ class RetrieveRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _role_from_token(authorization: Optional[str]) -> str:
+def _claims_from_auth(authorization: Optional[str]) -> dict | None:
     token = _extract_bearer(authorization)
     if not token:
-        return "anonymous"
-    claims = verify_token(token)
+        return None
+    return verify_token(token)
+
+
+def _role_from_token(authorization: Optional[str]) -> str:
+    claims = _claims_from_auth(authorization)
     if not claims:
         return "anonymous"
     return str(claims.get("role") or "anonymous")
@@ -232,11 +313,81 @@ def health():
     return {"status": "healthy", "service": "gateway"}
 
 
+@app.post("/signup")
+def signup_route(body: SignupRequest):
+    """Create an affiliated user with empty hospital grants."""
+    try:
+        user = signup(body.username, body.password, body.org)
+    except ValueError as exc:
+        code = str(exc)
+        if code == "taken":
+            raise HTTPException(status_code=409, detail="Username already taken.") from exc
+        if code == "reserved":
+            raise HTTPException(status_code=400, detail="Username is reserved.") from exc
+        raise HTTPException(
+            status_code=400, detail="Username and password are required."
+        ) from exc
+    return {"ok": True, "user": user}
+
+
 @app.post("/login")
 def login_route(body: LoginRequest):
-    """Issue a signed token carrying {role, org, irb_approved} for `username`.
-    Unknown usernames resolve to the anonymous role (see auth.USERS)."""
-    return login(body.username)
+    """Password login → JWT with {role, org, irb_approved, hospitals}."""
+    try:
+        return login(body.username, body.password)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=401, detail="Invalid username or password."
+        ) from exc
+
+
+@app.get("/admin/users")
+def admin_list_users(authorization: Optional[str] = Header(default=None)):
+    claims = _claims_from_auth(authorization)
+    try:
+        require_network_admin(claims)
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=403, detail="Network admin required."
+        ) from exc
+    return {"users": list_users()}
+
+
+@app.patch("/admin/users/{username}")
+def admin_update_user(
+    username: str,
+    body: AdminUserUpdate,
+    authorization: Optional[str] = Header(default=None),
+):
+    claims = _claims_from_auth(authorization)
+    try:
+        require_network_admin(claims)
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=403, detail="Network admin required."
+        ) from exc
+
+    try:
+        user = update_user(
+            username,
+            role=body.role,
+            hospitals=body.hospitals,
+            org=body.org,
+            irb_approved=body.irb_approved,
+        )
+    except ValueError as exc:
+        code = str(exc)
+        if code == "missing":
+            raise HTTPException(status_code=404, detail="User not found.") from exc
+        if code == "bad_role":
+            raise HTTPException(status_code=400, detail="Invalid role.") from exc
+        if code == "protect_admin":
+            raise HTTPException(
+                status_code=400, detail="Cannot demote the network admin account."
+            ) from exc
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {"ok": True, "user": user}
 
 
 @app.post("/search")
@@ -247,6 +398,8 @@ async def search(
     expanded = expand_terms(body.query)
     terms = list(expanded.get("terms") or [])
     role = _role_from_token(authorization)
+    epsilon = body.epsilon
+    k = 5
 
     payload: dict[str, Any] = {"terms": terms}
     if expanded.get("body_part"):
@@ -261,11 +414,51 @@ async def search(
             _fanout_search(client, name, url, payload)
             for name, url in NODES.items()
         ]
-        raw_counts = await asyncio.gather(*tasks)
+        raw_counts = list(await asyncio.gather(*tasks))
 
-    counts_list = list(raw_counts)
-    results = apply_suppression(counts_list, k=5, role=role)
-    # Normalize hospital key in case a real privacy module returns "node"
+        results = apply_suppression(
+            raw_counts, k=k, role=role, epsilon=epsilon
+        )
+
+        # One-shot generalization rollup for hard-suppressed hospitals:
+        # re-query that node at the next-coarser hierarchy level. If the
+        # coarser true count meets k, replace silence with a rollup card.
+        # No recursive climb — at most one extra fan-out round.
+        coarser = next_coarser_from_expanded(expanded)
+        if coarser and role != "anonymous":
+            coarse_payload = dict(payload)
+            coarse_payload["terms"] = list(coarser["terms"])
+            rollup_level = str(coarser["rollup_level"])
+            pediatric_prefix = (
+                "pediatric " if expanded.get("pediatric") else ""
+            )
+
+            for idx, row in enumerate(results):
+                if "display" not in row or "rollup_count" in row:
+                    continue
+                hospital = row.get("hospital")
+                if not hospital or hospital not in NODES:
+                    continue
+                coarse_row = await _fanout_search(
+                    client, hospital, NODES[hospital], coarse_payload
+                )
+                coarse_count = int(coarse_row.get("count", 0))
+                if coarse_count < k:
+                    continue
+                shown = privatize_count(
+                    coarse_count, k=k, epsilon=epsilon
+                )
+                results[idx] = {
+                    "hospital": hospital,
+                    "display": (
+                        f"Too small at this level; {shown} cases at "
+                        f"coarser level: {pediatric_prefix}{rollup_level}"
+                    ),
+                    "rollup_count": shown,
+                    "rollup_level": rollup_level,
+                }
+
+    # Normalize hospital key in case a module returns "node"
     normalized: list[dict] = []
     for item in results:
         entry = dict(item)
@@ -276,7 +469,7 @@ async def search(
     return {
         "query_expanded_to": terms,
         "results": normalized,
-        "network_total": _network_total(counts_list, k=5),
+        "network_total": _network_total(raw_counts, k=k),
     }
 
 
@@ -298,6 +491,25 @@ async def retrieve(
         raise HTTPException(
             status_code=401,
             detail="Authorization Bearer token required for retrieve.",
+        )
+
+    claims = verify_token(token)
+    if not claims:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired token.",
+        )
+
+    granted = [str(h).upper() for h in (claims.get("hospitals") or [])]
+    if hospital not in granted:
+        return JSONResponse(
+            status_code=403,
+            content={
+                "error": (
+                    f"User not granted access to {hospital}. "
+                    f"Granted hospitals: {', '.join(granted) or '(none)'}."
+                )
+            },
         )
 
     headers = {"Authorization": f"Bearer {token}"}
