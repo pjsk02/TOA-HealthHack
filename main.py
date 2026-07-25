@@ -87,7 +87,15 @@ def get_study(study_id: str):
 # {role, org, irb_approved, sub} return shape.
 # ---------------------------------------------------------------------------
 
-JWT_SECRET = os.environ.get("MEDFIND_JWT_SECRET", "medfind-hackathon-demo-secret").encode()
+# Default MUST match gateway/auth.py's SECRET exactly, or every real token
+# issued by the gateway will fail signature verification here and silently
+# resolve to the anonymous role (see verify_token below) -- with no error
+# raised anywhere, since verify_token fails closed to anonymous rather than
+# throwing. Override both sides together via MEDFIND_JWT_SECRET if you ever
+# rotate this for a real deployment.
+JWT_SECRET = os.environ.get(
+    "MEDFIND_JWT_SECRET", "medfind-hackathon-demo-secret-do-not-use-in-prod"
+).encode()
 VALID_ROLES = {"anonymous", "affiliated", "irb_approved"}
 ANONYMOUS_CLAIMS = {"role": "anonymous", "org": None, "irb_approved": False, "sub": None}
 
