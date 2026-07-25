@@ -27,7 +27,18 @@
     "irb_approved": true,
     "hospitals": [
       "BCH",
+      "MGH",
       "BWH"
+    ]
+  },
+  "navya": {
+    "password": "navya123",
+    "role": "irb_approved",
+    "org": "Independent",
+    "irb_approved": true,
+    "hospitals": [
+      "BCH",
+      "MGH"
     ]
   }
 }
