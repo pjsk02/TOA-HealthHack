@@ -1,0 +1,529 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>MedFind — Federated DICOM Discovery</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    --bg: #0f1420;
+    --panel: #161d2e;
+    --panel-2: #1d2740;
+    --border: #2a3550;
+    --text: #e7ecf7;
+    --muted: #93a0bd;
+    --accent: #4f8cff;
+    --good: #2fbf71;
+    --warn: #f5a623;
+    --bad: #ef4b4b;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 28px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+  }
+  header h1 { font-size: 18px; margin: 0; }
+  header h1 span { color: var(--accent); }
+  header .tagline { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  #identity-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .badge {
+    padding: 5px 12px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+  .badge.role-irb_approved { background: rgba(47,191,113,0.18); color: var(--good); border: 1px solid var(--good); }
+  .badge.role-affiliated { background: rgba(245,166,35,0.18); color: var(--warn); border: 1px solid var(--warn); }
+  .badge.role-anonymous { background: rgba(239,75,75,0.12); color: var(--bad); border: 1px solid var(--bad); }
+
+  main {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+  }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px 22px;
+  }
+  .panel h2 {
+    margin: 0 0 4px 0;
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+  }
+  .panel .step-desc {
+    font-size: 13px;
+    color: var(--muted);
+    margin: 0 0 14px 0;
+  }
+
+  .login-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+  }
+  button {
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s ease;
+  }
+  button:hover { opacity: 0.88; }
+  button.secondary {
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  button.danger-outline {
+    background: transparent;
+    color: var(--bad);
+    border: 1px solid var(--bad);
+  }
+  input[type="text"], input[type="number"], select {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+  }
+  input[type="text"] { min-width: 260px; }
+
+  .search-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 14px;
+  }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 4px 0; }
+  .chip {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 12px;
+    padding: 4px 10px;
+    border-radius: 999px;
+  }
+
+  .results-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+    margin-top: 14px;
+  }
+  .result-card {
+    border-radius: 10px;
+    padding: 16px;
+    border: 1px solid var(--border);
+    background: var(--panel-2);
+  }
+  .result-card .hospital {
+    font-size: 12px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 8px;
+  }
+  .result-card .count {
+    font-size: 30px;
+    font-weight: 700;
+  }
+  .result-card.suppressed {
+    background: rgba(239,75,75,0.08);
+    border: 1px solid var(--bad);
+  }
+  .result-card.suppressed .lock-icon {
+    font-size: 20px;
+    margin-bottom: 6px;
+  }
+  .result-card.suppressed .msg {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--bad);
+    line-height: 1.4;
+  }
+  .network-total {
+    margin-top: 14px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  .retrieve-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+  }
+
+  #retrieve-result { margin-top: 16px; }
+  .study-card {
+    border: 1px solid var(--good);
+    background: rgba(47,191,113,0.08);
+    border-radius: 10px;
+    padding: 18px;
+  }
+  .study-card .title {
+    font-weight: 700;
+    color: var(--good);
+    margin-bottom: 10px;
+    font-size: 14px;
+  }
+  .study-card table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .study-card td { padding: 4px 0; vertical-align: top; }
+  .study-card td.k { color: var(--muted); width: 40%; }
+  .study-card td.v { font-weight: 600; word-break: break-word; }
+  .study-card .diagnosis {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(47,191,113,0.3);
+    white-space: pre-wrap;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--text);
+  }
+
+  .denied-banner {
+    border: 2px solid var(--bad);
+    background: rgba(239,75,75,0.14);
+    border-radius: 10px;
+    padding: 22px;
+    text-align: center;
+  }
+  .denied-banner .icon { font-size: 34px; margin-bottom: 8px; }
+  .denied-banner .headline {
+    font-size: 18px;
+    font-weight: 800;
+    color: var(--bad);
+    letter-spacing: 0.03em;
+    margin-bottom: 6px;
+  }
+  .denied-banner .detail { font-size: 13px; color: var(--text); }
+
+  .empty-hint { font-size: 13px; color: var(--muted); font-style: italic; }
+  .error-line { color: var(--bad); font-size: 13px; margin-top: 8px; }
+  #status-line { font-size: 12px; color: var(--muted); margin-top: 6px; }
+
+  label.field-label {
+    font-size: 12px;
+    color: var(--muted);
+    display: block;
+    margin-bottom: 4px;
+  }
+  .field-group { display: flex; flex-direction: column; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Med<span>Find</span></h1>
+    <div class="tagline">Federated DICOM Discovery Network — Track 1 Demo</div>
+  </div>
+  <div id="identity-bar">
+    <span id="identity-badge" class="badge role-anonymous">Anonymous</span>
+  </div>
+</header>
+
+<main>
+
+  <!-- Step 1: Login -->
+  <section class="panel">
+    <h2>Step 1 — Identity</h2>
+    <p class="step-desc">Log in to establish a role. Hospitals decide access per role, per institution — the gateway just carries the token.</p>
+    <div class="login-row">
+      <div class="field-group">
+        <label class="field-label" for="username-input">Username</label>
+        <input id="username-input" type="text" value="jorgenson" placeholder="username" />
+      </div>
+      <button id="login-btn" onclick="doLogin()">Log in as Dr. Jorgenson (IRB-approved)</button>
+      <button class="secondary" onclick="loginAs('chen')">Log in as affiliated researcher</button>
+      <button class="danger-outline" onclick="goAnonymous()">Continue as Anonymous</button>
+    </div>
+    <div id="status-line">Not logged in — acting as anonymous.</div>
+  </section>
+
+  <!-- Step 2: Search -->
+  <section class="panel">
+    <h2>Step 2 — Discovery Search</h2>
+    <p class="step-desc">Counts only, per hospital. Cohorts smaller than 5 collapse to a safety message — never a number, never rows.</p>
+    <div class="search-row">
+      <div class="field-group">
+        <label class="field-label" for="query-input">Query</label>
+        <input id="query-input" type="text" value="pediatric brain tumor MRI" />
+      </div>
+      <div class="field-group">
+        <label class="field-label" for="age-input">Max age (years, optional)</label>
+        <input id="age-input" type="number" min="0" placeholder="e.g. 3" style="width: 140px;" />
+      </div>
+      <button onclick="doSearch()">Search</button>
+    </div>
+    <div class="chips" id="expanded-terms"></div>
+    <div id="search-results">
+      <p class="empty-hint">Run a search to see per-hospital counts.</p>
+    </div>
+    <div class="network-total" id="network-total"></div>
+    <div id="search-error" class="error-line"></div>
+  </section>
+
+  <!-- Step 3: Retrieve -->
+  <section class="panel">
+    <h2>Step 3 — Retrieve a Study</h2>
+    <p class="step-desc">Every retrieval re-verifies the token at the hospital node. Zero trust: the hospital decides, every time.</p>
+    <div class="retrieve-row">
+      <div class="field-group">
+        <label class="field-label" for="hospital-select">Hospital</label>
+        <select id="hospital-select">
+          <option value="BCH" selected>BCH — Boston Children's</option>
+          <option value="MGH">MGH — Mass General</option>
+          <option value="BWH">BWH — Brigham and Women's</option>
+        </select>
+      </div>
+      <div class="field-group">
+        <label class="field-label" for="study-id-input">Study ID</label>
+        <input id="study-id-input" type="text" value="BR-7721" style="width: 160px;" />
+      </div>
+      <button onclick="doRetrieve()">Retrieve Study</button>
+    </div>
+    <div id="retrieve-result">
+      <p class="empty-hint">Retrieve a study to see the de-identified result, or an access denial.</p>
+    </div>
+  </section>
+
+</main>
+
+<script>
+  const GATEWAY = "http://localhost:8000";
+
+  let state = {
+    username: null,
+    token: null,
+    role: "anonymous",
+  };
+
+  function setStatus(msg) {
+    document.getElementById("status-line").textContent = msg;
+  }
+
+  function updateIdentityBadge() {
+    const badge = document.getElementById("identity-badge");
+    badge.className = "badge role-" + state.role;
+    const labels = {
+      irb_approved: "IRB-Approved Researcher" + (state.username ? " — " + state.username : ""),
+      affiliated: "Affiliated Researcher" + (state.username ? " — " + state.username : ""),
+      anonymous: "Anonymous",
+    };
+    badge.textContent = labels[state.role] || state.role;
+  }
+
+  async function loginAs(username) {
+    document.getElementById("username-input").value = username;
+    await doLogin();
+  }
+
+  async function doLogin() {
+    const username = document.getElementById("username-input").value.trim() || "jorgenson";
+    setStatus("Logging in as " + username + " ...");
+    try {
+      const res = await fetch(GATEWAY + "/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username }),
+      });
+      if (!res.ok) throw new Error("login failed (" + res.status + ")");
+      const data = await res.json();
+      state.token = data.token;
+      state.username = username;
+      state.role = decodeRoleFromToken(data.token) || "irb_approved";
+      updateIdentityBadge();
+      setStatus("Logged in as " + username + ". Token attached to every request.");
+    } catch (err) {
+      setStatus("Login error: " + err.message + " (is the gateway running on :8000?)");
+    }
+  }
+
+  function decodeRoleFromToken(token) {
+    // Best-effort client-side peek at the JWT payload just to reflect
+    // role in the badge immediately; the server re-verifies independently.
+    try {
+      const payload = JSON.parse(atob(token.split(".")[1]));
+      return payload.role;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function goAnonymous() {
+    state.token = null;
+    state.username = null;
+    state.role = "anonymous";
+    updateIdentityBadge();
+    setStatus("Acting as anonymous — no token attached to requests.");
+  }
+
+  function authHeaders() {
+    return state.token ? { "Authorization": "Bearer " + state.token } : {};
+  }
+
+  async function doSearch() {
+    const query = document.getElementById("query-input").value.trim();
+    const ageVal = document.getElementById("age-input").value;
+    const body = { query };
+    if (ageVal !== "") body.max_age_years = Number(ageVal);
+
+    document.getElementById("search-error").textContent = "";
+    document.getElementById("search-results").innerHTML = "<p class=\"empty-hint\">Searching...</p>";
+
+    try {
+      const res = await fetch(GATEWAY + "/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error("search failed (" + res.status + ")");
+      const data = await res.json();
+      renderSearchResults(data);
+    } catch (err) {
+      document.getElementById("search-results").innerHTML = "";
+      document.getElementById("search-error").textContent =
+        "Search error: " + err.message + " (is the gateway running on :8000?)";
+    }
+  }
+
+  function renderSearchResults(data) {
+    const chipsEl = document.getElementById("expanded-terms");
+    chipsEl.innerHTML = "";
+    (data.query_expanded_to || []).forEach((term) => {
+      const chip = document.createElement("span");
+      chip.className = "chip";
+      chip.textContent = term;
+      chipsEl.appendChild(chip);
+    });
+
+    const grid = document.createElement("div");
+    grid.className = "results-grid";
+
+    (data.results || []).forEach((r) => {
+      const card = document.createElement("div");
+      if (r.display) {
+        card.className = "result-card suppressed";
+        card.innerHTML =
+          '<div class="lock-icon">\u{1F512}</div>' +
+          '<div class="hospital">' + r.hospital + "</div>" +
+          '<div class="msg">' + r.display + "</div>";
+      } else {
+        card.className = "result-card";
+        card.innerHTML =
+          '<div class="hospital">' + r.hospital + "</div>" +
+          '<div class="count">' + r.count + "</div>";
+      }
+      grid.appendChild(card);
+    });
+
+    const resultsEl = document.getElementById("search-results");
+    resultsEl.innerHTML = "";
+    resultsEl.appendChild(grid);
+
+    const totalEl = document.getElementById("network-total");
+    totalEl.textContent = data.network_total ? "Network total: " + data.network_total : "";
+  }
+
+  async function doRetrieve() {
+    const hospital = document.getElementById("hospital-select").value;
+    const study_id = document.getElementById("study-id-input").value.trim();
+    const resultEl = document.getElementById("retrieve-result");
+    resultEl.innerHTML = "<p class=\"empty-hint\">Retrieving...</p>";
+
+    try {
+      const res = await fetch(GATEWAY + "/retrieve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ hospital, study_id }),
+      });
+      const data = await res.json();
+
+      if (res.status === 403) {
+        renderDenied(data);
+      } else if (!res.ok) {
+        resultEl.innerHTML =
+          '<p class="error-line">Retrieve error (' + res.status + '): ' +
+          (data.error || data.detail || "unknown error") + "</p>";
+      } else {
+        renderStudy(data);
+      }
+    } catch (err) {
+      resultEl.innerHTML = '<p class="error-line">Retrieve error: ' + err.message + "</p>";
+    }
+  }
+
+  function renderDenied(data) {
+    const resultEl = document.getElementById("retrieve-result");
+    resultEl.innerHTML =
+      '<div class="denied-banner">' +
+        '<div class="icon">\u{1F6AB}</div>' +
+        '<div class="headline">ACCESS DENIED</div>' +
+        '<div class="detail">' + (data.error || "Access denied by hospital policy.") + "</div>" +
+      "</div>";
+  }
+
+  function renderStudy(study) {
+    const resultEl = document.getElementById("retrieve-result");
+    const fields = [
+      ["Study ID", study.StudyID],
+      ["Institution", study.InstitutionName],
+      ["Patient Age", study.PatientAge],
+      ["Patient Sex", study.PatientSex],
+      ["Modality", study.Modality],
+      ["Body Part", study.BodyPartExamined],
+      ["Study Date", study.StudyDate],
+      ["Study UID", study.StudyInstanceUID],
+    ];
+    let rows = fields
+      .filter(([, v]) => v !== undefined && v !== null)
+      .map(([k, v]) => '<tr><td class="k">' + k + '</td><td class="v">' + v + "</td></tr>")
+      .join("");
+
+    resultEl.innerHTML =
+      '<div class="study-card">' +
+        '<div class="title">✓ De-identified — PatientName / PatientID / PatientBirthDate removed</div>' +
+        "<table>" + rows + "</table>" +
+        (study.Diagnosis ? '<div class="diagnosis">' + study.Diagnosis + "</div>" : "") +
+      "</div>";
+  }
+
+  updateIdentityBadge();
+</script>
+
+</body>
+</html>
