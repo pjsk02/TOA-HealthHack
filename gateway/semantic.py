@@ -9,7 +9,10 @@ synonyms.py. No LLM or embeddings -- the dictionary is the deliverable.
 
 import re
 
-from synonyms import expand_term
+try:
+    from .synonyms import expand_term
+except ImportError:
+    from synonyms import expand_term  # type: ignore
 
 # BCH (the only pediatric node) covers ages 0-21 (PRD section 9), so an
 # explicit age ceiling in that range implies a pediatric-oriented query even
