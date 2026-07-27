@@ -16,6 +16,8 @@ MedFind answers, for a participating network: **where might relevant data exist,
 
 MedFind is a **distributed search** network: a central **gateway** takes a researcher's natural-language query, expands it into the clinical vocabulary each hospital actually uses in its reports, and forwards the query to every hospital node in parallel. Each hospital node runs its own database and evaluates the query — and, separately, any retrieval request — against its **own** local access policy. The gateway never stores patient data and never overrides a hospital's access decision; it only carries the researcher's identity token and aggregates what the hospitals are willing to disclose.
 
+Working Video: https://drive.google.com/file/d/1OOG3xRGLXi4QTF12FMIx-KwVjl-CglF5/view?usp=drive_link
+
 ```
                         researcher (browser / API client)
                                    │
